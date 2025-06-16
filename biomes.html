@@ -100,6 +100,8 @@
         <h3>Biomes</h3>
         <div id="biomeList"></div>
 
+        <button onclick="reset()">RESET</button>
+
         <h4>Add / Edit Biome</h4>
         <form id="biomeForm">
             <input type="hidden" id="biomeIndex" />
@@ -444,6 +446,10 @@
 
         function export_(){
             document.getElementById("export").value = JSON.stringify(biomePoints);
+        }
+
+        function reset(){
+            let biomePoints =JSON.parse(`[{"name":"PLAINS","temp":23.2125,"rain":2058.75,"weight":1,"color":"#8FBC8F"},{"name":"PLAINS","temp":11.8125,"rain":1061.25,"weight":1,"color":"#8FBC8F"},{"name":"HILLS","temp":12.112500000000004,"rain":1252.5,"weight":1,"color":"#77A777"},{"name":"LOWLANDS","temp":7.462499999999999,"rain":1560,"weight":1,"color":"#66CC66"},{"name":"LOW_CANYONS","temp":10.612499999999997,"rain":1368.75,"weight":1,"color":"#D2B48C"},{"name":"ROLLING_HILLS","temp":13.6875,"rain":772.5,"weight":1,"color":"#90EE90"},{"name":"HIGHLANDS","temp":1.8375000000000021,"rain":712.5,"weight":1,"color":"#4CAF50"},{"name":"BADLANDS","temp":16.462500000000006,"rain":540,"weight":1,"color":"#FFD700"},{"name":"INVERTED_BADLANDS","temp":21.862499999999997,"rain":982.5,"weight":1,"color":"#DEB887"},{"name":"PLATEAU","temp":4.162499999999994,"rain":1143.75,"weight":1.7,"color":"#A9A9A9"},{"name":"CANYONS","temp":15.262500000000003,"rain":648.75,"weight":1,"color":"#DAA520"},{"name":"Taiga","temp":-12.787500000000001,"rain":311.25,"weight":1,"color":"#006b47"}]`);
         }
     </script>
 </body>
