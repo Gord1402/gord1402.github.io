@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Biome Climate Voronoi Diagram</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: 'Segoe UI', sans-serif;
+            display: flex;
+            height: 100vh;
+            background: #f9f9f9;
+        }
+
+        #controls {
+            width: 400px;
+            padding: 16px;
+            background: #ffffff;
+            border-right: 1px solid #ccc;
+            overflow-y: auto;
+            box-sizing: border-box;
+        }
+
+        #controls h3, #controls h4 {
+            margin-top: 0;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 4px;
+        }
+
+        #canvas-container {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+
+        canvas {
+            border: 1px solid #ccc;
+            background: #fff;
+            box-shadow: 0 0 8px rgba(0,0,0,0.1);
+        }
+
+        #tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.85);
+            color: white;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 13px;
+            pointer-events: none;
+            display: none;
+            z-index: 10;
+            max-width: 200px;
+            white-space: nowrap;
+        }
+
+        label {
+            display: block;
+            margin-top: 10px;
+            font-weight: 600;
+        }
+
+        input[type="range"],
+        input[type="number"],
+        input[type="color"],
+        input[type="text"] {
+            margin-top: 4px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .biome-item {
+            margin: 4px 0;
+            font-size: 14px;
+        }
+
+        button {
+            margin-top: 4px;
+            padding: 4px 8px;
+            font-size: 13px;
+            background: #007BFF;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <h3>Climate Parameters</h3>
+        <div id="sliders"></div>
+
+        <h3>Biomes</h3>
+        <div id="biomeList"></div>
+
+        <h4>Add / Edit Biome</h4>
+        <form id="biomeForm">
+            <input type="hidden" id="biomeIndex" />
+            <label>Name <input type="text" id="name" required /></label>
+            <label>Temperature <input type="number" id="temp" step="0.1" required /></label>
+            <label>Rainfall <input type="number" id="rain" step="1" required /></label>
+            <label>Weight <input type="number" id="weight" step="0.1" required /></label>
+            <label>Color <input type="color" id="color" required /></label>
+            <button type="submit">Save Biome</button>
+        </form>
+        
+        <button onclick="export_()">Export</button><br>
+        <textarea id="export">
+
+        </textarea>
+    </div>
+    <div id="canvas-container">
+        <canvas id="voronoiCanvas" width="800" height="800"></canvas>
+    </div>
+
+    <div id="tooltip"></div>
+    <script>
+        const canvas = document.getElementById("voronoiCanvas");
+        const ctx = canvas.getContext("2d");
+        const tooltip = document.getElementById("tooltip");
+
+        let draggingIndex = -1;
+
+        const WIDTH = canvas.width;
+        const HEIGHT = canvas.height;
+
+        const defaultParams = {
+            eq: 25,
+            polarT: -50,
+            temperatureO: 90,
+            polarRain: 70.3,
+            o1: 19.4,
+            o2: 10,
+            o3: 37.7,
+            A: 2660,
+            B: 1270,
+            D: 310
+        };
+
+        const minimumParams = {
+            eq: -30,
+            polarT: -90,
+            temperatureO: 0,
+            polarRain: 0,
+            o1: 0,
+            o2: 0,
+            o3: 0,
+            A: 0,
+            B: 0,
+            D: 0
+        };
+
+        const maximumParams = {
+            eq: 60,
+            polarT: 10,
+            temperatureO: 120,
+            polarRain: 100,
+            o1: 60,
+            o2: 50,
+            o3: 100,
+            A: 3000,
+            B: 3000,
+            D: 3000
+        };
+
+
+        let params = { ...defaultParams };
+
+        function climateFormula(lat){
+            const p2 = x => x * x;
+            const dist = (x, o) => Math.exp(-p2(x / o));
+
+            const temperature = (params.eq - params.polarT) * dist(lat, params.temperatureO) + params.polarT;
+            const rainfall = params.A * dist(lat, params.o1) +
+                            params.B * (dist(lat - 45, params.o2) + dist(lat + 45, params.o2)) +
+                            params.D * (dist(lat - params.polarRain, params.o3) + dist(lat + params.polarRain, params.o3));
+            return [temperature, rainfall];
+        }
+
+        const climateToCanvas = (temp, rain) => [
+            (rain / 3000) * WIDTH,
+            HEIGHT - ((temp + 30) / 60) * HEIGHT,
+        ];
+
+        const canvasToClimate = (x, y) => {
+            const rainfall = (x / WIDTH) * 3000;
+            const temperature = ((HEIGHT - y) / HEIGHT) * 60 - 30;
+            return { temperature, rainfall };
+        };
+
+        let biomePoints = JSON.parse(localStorage.getItem("biomePoints")) || JSON.parse(`[{"name":"PLAINS","temp":23.2125,"rain":2058.75,"weight":1,"color":"#8FBC8F"},{"name":"PLAINS","temp":11.8125,"rain":1061.25,"weight":1,"color":"#8FBC8F"},{"name":"HILLS","temp":12.112500000000004,"rain":1252.5,"weight":1,"color":"#77A777"},{"name":"LOWLANDS","temp":7.462499999999999,"rain":1560,"weight":1,"color":"#66CC66"},{"name":"LOW_CANYONS","temp":10.612499999999997,"rain":1368.75,"weight":1,"color":"#D2B48C"},{"name":"ROLLING_HILLS","temp":13.6875,"rain":772.5,"weight":1,"color":"#90EE90"},{"name":"HIGHLANDS","temp":1.8375000000000021,"rain":712.5,"weight":1,"color":"#4CAF50"},{"name":"BADLANDS","temp":16.462500000000006,"rain":540,"weight":1,"color":"#FFD700"},{"name":"INVERTED_BADLANDS","temp":21.862499999999997,"rain":982.5,"weight":1,"color":"#DEB887"},{"name":"PLATEAU","temp":4.162499999999994,"rain":1143.75,"weight":1.7,"color":"#A9A9A9"},{"name":"CANYONS","temp":15.262500000000003,"rain":648.75,"weight":1,"color":"#DAA520"},{"name":"Taiga","temp":-12.787500000000001,"rain":311.25,"weight":1,"color":"#006b47"}]`);
+
+        function saveBiomes() {
+            localStorage.setItem("biomePoints", JSON.stringify(biomePoints));
+        }
+
+        function similarity(p1, p2) {
+            const dx = (p1.rain - p2.rain) / 100;
+            const dy = p1.temp - p2.temp;
+            return Math.sqrt(dx * dx + dy * dy) * p2.weight;
+        }
+
+        function drawVoronoi() {
+            const img = ctx.createImageData(WIDTH, HEIGHT);
+            const data = img.data;
+
+            for (let y = 0; y < HEIGHT; y++) {
+                for (let x = 0; x < WIDTH; x++) {
+                    const { temperature, rainfall } = canvasToClimate(x, y);
+
+                    let closest = null;
+                    let minDist = Infinity;
+
+                    for (const biome of biomePoints) {
+                        const dist = similarity(
+                            { temp: temperature, rain: rainfall },
+                            { temp: biome.temp, rain: biome.rain, weight: biome.weight }
+                        );
+                        if (dist < minDist) {
+                            minDist = dist;
+                            closest = biome;
+                        }
+                    }
+
+                    const [r, g, b] = hexToRgb(closest.color);
+                    const i = (y * WIDTH + x) * 4;
+                    data[i] = r;
+                    data[i + 1] = g;
+                    data[i + 2] = b;
+                    data[i + 3] = 255;
+                }
+            }
+
+            ctx.putImageData(img, 0, 0);
+
+            for (const biome of biomePoints) {
+                const [x, y] = climateToCanvas(biome.temp, biome.rain);
+                ctx.beginPath();
+                ctx.arc(x, y, 5, 0, 2 * Math.PI);
+                ctx.fillStyle = "#000";
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(x, y, 4, 0, 2 * Math.PI);
+                ctx.fillStyle = biome.color;
+                ctx.fill();
+            }
+
+            let prev = null;
+            ctx.strokeStyle = "#000";
+            for (let lat = -1; lat < 90; lat += 1) {
+                const point = climateFormula(lat);
+                if (prev != null) {
+                    ctx.beginPath();
+                    ctx.moveTo(...climateToCanvas(...prev));
+                    ctx.lineTo(...climateToCanvas(...point));
+                    ctx.stroke();
+                }
+                prev = point;
+            }
+        }
+
+        function hexToRgb(hex) {
+            const bigint = parseInt(hex.slice(1), 16);
+            return [(bigint >> 16) & 255, (bigint >> 8) & 255, bigint & 255];
+        }
+
+        canvas.addEventListener("mousemove", (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            const { temperature, rainfall } = canvasToClimate(x, y);
+
+            let closest = null;
+            let minDist = Infinity;
+            for (const biome of biomePoints) {
+                const dist = similarity(
+                    { temp: temperature, rain: rainfall },
+                    { temp: biome.temp, rain: biome.rain, weight: biome.weight }
+                );
+                if (dist < minDist) {
+                    minDist = dist;
+                    closest = biome;
+                }
+            }
+
+            tooltip.innerHTML = `<b>${closest.name}</b><br>Temp: ${temperature.toFixed(1)}°C<br>Rain: ${rainfall.toFixed(0)}mm`;
+
+            const tooltipWidth = tooltip.offsetWidth;
+            const tooltipHeight = tooltip.offsetHeight;
+            tooltip.style.left = Math.min(e.clientX + 10, window.innerWidth - tooltipWidth - 10) + "px";
+            tooltip.style.top = Math.min(e.clientY + 10, window.innerHeight - tooltipHeight - 10) + "px";
+            tooltip.style.display = "block";
+        });
+
+
+        canvas.addEventListener("mouseleave", () => {
+            tooltip.style.display = "none";
+        });
+
+        function initSliders() {
+            const container = document.getElementById("sliders");
+            container.innerHTML = "";
+            for (const key in defaultParams) {
+                const wrapper = document.createElement("div");
+                wrapper.style.marginBottom = "10px";
+
+                const label = document.createElement("label");
+                label.textContent = `${key}`;
+                label.style.display = "block";
+
+                const slider = document.createElement("input");
+                slider.type = "range";
+                slider.min = minimumParams[key];
+                slider.max = maximumParams[key];
+                slider.step = 0.1;
+                slider.value = params[key];
+
+                const numberInput = document.createElement("input");
+                numberInput.type = "number";
+                numberInput.min = minimumParams[key];
+                numberInput.max = maximumParams[key];
+                numberInput.step = 0.1;
+                numberInput.value = params[key];
+                numberInput.style.width = "80px";
+                numberInput.style.marginLeft = "10px";
+
+                slider.addEventListener("input", () => {
+                    numberInput.value = slider.value;
+                    params[key] = parseFloat(slider.value);
+                    drawVoronoi();
+                });
+                numberInput.addEventListener("input", () => {
+                    slider.value = numberInput.value;
+                    params[key] = parseFloat(numberInput.value);
+                    drawVoronoi();
+                });
+
+                wrapper.appendChild(label);
+                wrapper.appendChild(slider);
+                wrapper.appendChild(numberInput);
+                container.appendChild(wrapper);
+            }
+        }
+
+
+        function refreshBiomeList() {
+            const list = document.getElementById("biomeList");
+            list.innerHTML = "";
+            biomePoints.forEach((b, i) => {
+                const div = document.createElement("div");
+                div.className = "biome-item";
+                div.innerHTML = `<span style="background:${b.color};padding:2px 4px;">${b.name}</span> 
+                    [${b.temp}°C, ${b.rain}mm, w:${b.weight}] 
+                    <button onclick="editBiome(${i})">Edit</button> 
+                    <button onclick="deleteBiome(${i})">Del</button>`;
+                list.appendChild(div);
+            });
+        }
+
+        document.getElementById("biomeForm").addEventListener("submit", (e) => {
+            e.preventDefault();
+            const idx = document.getElementById("biomeIndex").value;
+            const newBiome = {
+                name: document.getElementById("name").value,
+                temp: parseFloat(document.getElementById("temp").value),
+                rain: parseFloat(document.getElementById("rain").value),
+                weight: parseFloat(document.getElementById("weight").value),
+                color: document.getElementById("color").value
+            };
+            if (idx === "") biomePoints.push(newBiome);
+            else biomePoints[parseInt(idx)] = newBiome;
+            saveBiomes();
+            drawVoronoi();
+            refreshBiomeList();
+            e.target.reset();
+        });
+
+        window.editBiome = function(i) {
+            const b = biomePoints[i];
+            document.getElementById("biomeIndex").value = i;
+            document.getElementById("name").value = b.name;
+            document.getElementById("temp").value = b.temp;
+            document.getElementById("rain").value = b.rain;
+            document.getElementById("weight").value = b.weight;
+            document.getElementById("color").value = b.color;
+        };
+
+        window.deleteBiome = function(i) {
+            if (confirm("Delete biome?")) {
+                biomePoints.splice(i, 1);
+                saveBiomes();
+                drawVoronoi();
+                refreshBiomeList();
+            }
+        };
+
+        initSliders();
+        refreshBiomeList();
+        drawVoronoi();
+
+
+        canvas.addEventListener("mousedown", (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            for (let i = 0; i < biomePoints.length; i++) {
+                const [bx, by] = climateToCanvas(biomePoints[i].temp, biomePoints[i].rain);
+                const dx = bx - x;
+                const dy = by - y;
+                if (dx * dx + dy * dy < 100) {
+                    draggingIndex = i;
+                    break;
+                }
+            }
+        });
+
+        canvas.addEventListener("mousemove", (e) => {
+            if (draggingIndex !== -1) {
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                const { temperature, rainfall } = canvasToClimate(x, y);
+                biomePoints[draggingIndex].temp = temperature;
+                biomePoints[draggingIndex].rain = rainfall;
+                drawVoronoi();
+            }
+        });
+
+        canvas.addEventListener("mouseup", () => {
+            if (draggingIndex !== -1) {
+                saveBiomes();
+                refreshBiomeList();
+                draggingIndex = -1;
+            }
+        });
+
+        function export_(){
+            document.getElementById("export").value = JSON.stringify(biomePoints);
+        }
+    </script>
+</body>
+</html>
